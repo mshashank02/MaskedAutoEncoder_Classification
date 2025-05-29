@@ -3,7 +3,7 @@ import torch
 import torch.nn as nn
 import torch.optim as optim
 from torch.utils.data import DataLoader, Subset
-from torchvision import datasets, transforms
+from torchvision import transforms
 from sklearn.linear_model import LogisticRegression
 from sklearn.neural_network import MLPClassifier
 from sklearn.model_selection import train_test_split
@@ -13,11 +13,9 @@ from timm.models.vision_transformer import vit_base_patch16_224
 from torchvision.datasets.utils import download_and_extract_archive
 import matplotlib.pyplot as plt
 import pandas as pd
-from collections import defaultdict
 from scipy.io import loadmat
 from PIL import Image
 import glob
-import random
 
 # ========== 1. Download and Load Dataset ==========
 DATA_ROOT = './flower_data'
@@ -50,22 +48,9 @@ transform = transforms.Compose([
     transforms.ToTensor(),
 ])
 
+# Select first 1020 images (10 per class)
 full_dataset = FlowerDataset(DATA_ROOT, transform)
-
-# ===== Few-shot: 10 samples per class =====
-class_to_indices = defaultdict(list)
-for idx, (_, label) in enumerate(full_dataset):
-    class_to_indices[label].append(idx)
-
-random.seed(42)
-for label in class_to_indices:
-    random.shuffle(class_to_indices[label])
-
-train_idx = []
-for label, indices in class_to_indices.items():
-    train_idx.extend(indices[:10])  # take 10 per class
-
-train_dataset = Subset(full_dataset, train_idx)
+train_dataset = Subset(full_dataset, list(range(1020)))
 train_loader = DataLoader(train_dataset, batch_size=32, shuffle=True)
 
 # ========== 2. Define MAE Model ==========
@@ -123,7 +108,7 @@ for epoch in range(20):
     train_losses.append(epoch_loss)
     print(f"Epoch {epoch+1}/20: Loss = {epoch_loss:.4f}")
 
-# Save loss curve
+# Save training loss plot
 plt.figure()
 plt.plot(range(1, len(train_losses)+1), train_losses, marker='o')
 plt.title("MAE Training Loss per Epoch")
