@@ -48,7 +48,7 @@ transform = transforms.Compose([
     transforms.ToTensor(),
 ])
 
-# Select first 1020 images (10 per class)
+# Use first 1020 images (10 per class × 102 classes)
 full_dataset = FlowerDataset(DATA_ROOT, transform)
 train_dataset = Subset(full_dataset, list(range(1020)))
 train_loader = DataLoader(train_dataset, batch_size=32, shuffle=True)
@@ -62,7 +62,7 @@ class MAE(nn.Module):
         self.decoder = nn.Sequential(
             nn.Linear(encoder.embed_dim, decoder_dim),
             nn.ReLU(),
-            nn.Linear(decoder_dim, encoder.patch_embed.proj.weight.shape[1])
+            nn.Linear(decoder_dim, 3 * 224 * 224)  # reconstruct full image
         )
 
     def forward(self, x):
@@ -78,7 +78,9 @@ class MAE(nn.Module):
 
         latent = self.encoder.blocks(patches_keep)
         latent = self.encoder.norm(latent)
+
         pred = self.decoder(latent.mean(dim=1))
+        pred = pred.view(B, 3, 224, 224)  # reshape to full image
         return pred
 
 # ========== 3. Pretrain MAE ==========
@@ -97,7 +99,7 @@ for epoch in range(20):
     for imgs, _ in train_loader:
         imgs = imgs.to(device)
         output = mae(imgs)
-        loss = criterion(output, imgs.view(imgs.size(0), -1))
+        loss = criterion(output, imgs)
 
         optimizer.zero_grad()
         loss.backward()
