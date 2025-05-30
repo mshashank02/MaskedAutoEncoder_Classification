@@ -8,6 +8,7 @@ from sklearn.linear_model import LogisticRegression
 from sklearn.neural_network import MLPClassifier
 from sklearn.pipeline import make_pipeline
 from sklearn.preprocessing import StandardScaler
+from sklearn.model_selection import train_test_split
 from sklearn.metrics import accuracy_score
 import numpy as np
 from timm.models.vision_transformer import vit_base_patch16_224
@@ -17,7 +18,6 @@ import pandas as pd
 from scipy.io import loadmat
 from PIL import Image
 import glob
-import urllib.request
 
 # ========== 1. Download and Load Dataset ==========
 DATA_ROOT = './flower_data'
@@ -61,69 +61,128 @@ val_ids = setid['valid'].squeeze() - 1
 train_dataset = Subset(full_dataset, train_ids.tolist())
 val_dataset = Subset(full_dataset, val_ids.tolist())
 
-train_loader = DataLoader(train_dataset, batch_size=32, shuffle=False)
+train_loader = DataLoader(train_dataset, batch_size=32, shuffle=True)
 val_loader = DataLoader(val_dataset, batch_size=32, shuffle=False)
 
-# ========== 2. Load Pretrained Encoder and Freeze ==========
+# ========== 2. Define MAE Model ==========
+class MAE(nn.Module):
+    def __init__(self, encoder, decoder_dim=512, mask_ratio=0.75):
+        super().__init__()
+        self.encoder = encoder
+        self.mask_ratio = mask_ratio
+        self.decoder = nn.Sequential(
+            nn.Linear(encoder.embed_dim, decoder_dim),
+            nn.ReLU(),
+            nn.Linear(decoder_dim, 3 * 224 * 224)
+        )
+
+    def forward(self, x):
+        B, C, H, W = x.shape
+        patches = self.encoder.patch_embed(x)
+        num_patches = patches.shape[1]
+        num_mask = int(self.mask_ratio * num_patches)
+
+        noise = torch.rand(B, num_patches, device=x.device)
+        ids_shuffle = torch.argsort(noise, dim=1)
+        ids_keep = ids_shuffle[:, :-num_mask]
+        patches_keep = torch.gather(patches, dim=1, index=ids_keep.unsqueeze(-1).repeat(1, 1, patches.shape[2]))
+
+        latent = self.encoder.blocks(patches_keep)
+        latent = self.encoder.norm(latent)
+
+        pred = self.decoder(latent.mean(dim=1))
+        pred = pred.view(B, 3, 224, 224)
+        return pred
+
+# ========== 3. Pretrain MAE ==========
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 encoder = vit_base_patch16_224(pretrained=False)
-encoder.eval()
-for param in encoder.parameters():
-    param.requires_grad = False
-encoder.to(device)
+mae = MAE(encoder).to(device)
 
-# ========== 3. Extract Features ==========
-def extract_features(model, dataloader):
-    features, labels = [], []
-    model.eval()
-    with torch.no_grad():
-        for imgs, lbls in dataloader:
-            imgs = imgs.to(device)
-            patches = model.patch_embed(imgs)
-            latent = model.blocks(patches)
-            pooled = model.norm(latent).mean(dim=1)
-            features.append(pooled.cpu().numpy())
-            labels.append(lbls.numpy())
-    return np.vstack(features), np.concatenate(labels)
+optimizer = optim.Adam(mae.parameters(), lr=1e-4)
+criterion = nn.MSELoss()
+train_losses = []
 
-print("\n🔍 Extracting features with frozen encoder...")
-X_train, y_train = extract_features(encoder, train_loader)
-X_val, y_val = extract_features(encoder, val_loader)
+print("🚀 Starting MAE pretraining...")
+for epoch in range(20):
+    mae.train()
+    total_loss = 0
+    for imgs, _ in train_loader:
+        imgs = imgs.to(device)
+        output = mae(imgs)
+        loss = criterion(output, imgs)
 
-# ========== 4. Train Linear and MLP Probes ==========
-print("\n🎯 Training linear probe...")
+        optimizer.zero_grad()
+        loss.backward()
+        optimizer.step()
+        total_loss += loss.item()
+
+    epoch_loss = total_loss / len(train_loader)
+    train_losses.append(epoch_loss)
+    print(f"Epoch {epoch+1}/20: Loss = {epoch_loss:.4f}")
+
+# Save training loss plot
+plt.figure()
+plt.plot(range(1, len(train_losses)+1), train_losses, marker='o')
+plt.title("MAE Training Loss per Epoch")
+plt.xlabel("Epoch")
+plt.ylabel("Loss")
+plt.grid(True)
+plt.savefig("mae_loss_curve.png")
+plt.close()
+
+# ========== 4. Feature Extraction ==========
+print("🔍 Extracting features...")
+mae.eval()
+features, labels = [], []
+with torch.no_grad():
+    for imgs, lbls in train_loader:
+        imgs = imgs.to(device)
+        patches = mae.encoder.patch_embed(imgs)
+        encoded = mae.encoder.blocks(patches).mean(dim=1)
+        features.append(encoded.cpu().numpy())
+        labels.append(lbls.numpy())
+
+features = np.vstack(features)
+labels = np.concatenate(labels)
+
+# ========== 5. Train Linear and MLP Classifiers ==========
+print("🎯 Training probes...")
+X_train, X_test, y_train, y_test = train_test_split(features, labels, test_size=0.3, stratify=labels, random_state=42)
+
+# Linear Probe
 clf_linear = make_pipeline(
     StandardScaler(),
-    LogisticRegression(max_iter=2000, random_state=42)
+    LogisticRegression(max_iter=2000)
 )
 clf_linear.fit(X_train, y_train)
-y_pred_linear = clf_linear.predict(X_val)
-acc_linear = accuracy_score(y_val, y_pred_linear)
+acc_linear = accuracy_score(y_test, clf_linear.predict(X_test))
 
-print("🎯 Training MLP probe...")
+# MLP Probe
 clf_mlp = make_pipeline(
     StandardScaler(),
     MLPClassifier(
-        hidden_layer_sizes=(512, 256),
+        hidden_layer_sizes=(256,),
+        activation='relu',
+        solver='adam',
         alpha=1e-4,
         learning_rate_init=1e-3,
         max_iter=1000,
+        random_state=42,
         early_stopping=True,
-        validation_fraction=0.2,
-        random_state=42
+        validation_fraction=0.2
     )
 )
 clf_mlp.fit(X_train, y_train)
-y_pred_mlp = clf_mlp.predict(X_val)
-acc_mlp = accuracy_score(y_val, y_pred_mlp)
+acc_mlp = accuracy_score(y_test, clf_mlp.predict(X_test))
 
-# ========== 5. Save Results ==========
+# Save results
 df = pd.DataFrame({
     "Probe": ["Linear", "MLP"],
     "Accuracy": [acc_linear, acc_mlp]
 })
-df.to_csv("frozen_encoder_probes.csv", index=False)
+df.to_csv("probe_results_4.csv", index=False)
 
-print(f"\n✅ Linear Probe Accuracy: {acc_linear * 100:.2f}%")
-print(f"✅ MLP Probe Accuracy: {acc_mlp * 100:.2f}%")
-print("📄 Results saved to 'frozen_encoder_probes.csv'")
+print("✅ Done. All steps completed.")
+print("📈 Loss curve saved to 'mae_loss_curve.png'")
+print("📄 Probe accuracies saved to 'probe_results.csv'")
