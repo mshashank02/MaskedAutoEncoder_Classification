@@ -48,7 +48,9 @@ class FlowerDataset(torch.utils.data.Dataset):
         return len(self.images)
 
 transform = transforms.Compose([
-    transforms.Resize((224, 224)),
+    transforms.RandomResizedCrop(224, scale=(0.5, 1.0)),
+    transforms.RandomHorizontalFlip(),
+    transforms.ColorJitter(brightness=0.4, contrast=0.4, saturation=0.4, hue=0.1),
     transforms.ToTensor(),
 ])
 
@@ -104,7 +106,7 @@ criterion = nn.MSELoss()
 train_losses = []
 
 print("🚀 Starting MAE pretraining...")
-for epoch in range(20):
+for epoch in range(100):
     mae.train()
     total_loss = 0
     for imgs, _ in train_loader:
@@ -119,7 +121,7 @@ for epoch in range(20):
 
     epoch_loss = total_loss / len(train_loader)
     train_losses.append(epoch_loss)
-    print(f"Epoch {epoch+1}/20: Loss = {epoch_loss:.4f}")
+    print(f"Epoch {epoch+1}/100: Loss = {epoch_loss:.4f}")
 
 # Save training loss plot
 plt.figure()
