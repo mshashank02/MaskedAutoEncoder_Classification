@@ -59,12 +59,15 @@ full_dataset = FlowerDataset(DATA_ROOT, transform)
 setid = loadmat(os.path.join(DATA_ROOT, 'setid.mat'))
 train_ids = setid['trnid'].squeeze() - 1
 val_ids = setid['valid'].squeeze() - 1
+test_ids = setid['tstid'].squeeze() - 1
 
 train_dataset = Subset(full_dataset, train_ids.tolist())
 val_dataset = Subset(full_dataset, val_ids.tolist())
+test_dataset = Subset(full_dataset, test_ids.tolist())
 
 train_loader = DataLoader(train_dataset, batch_size=32, shuffle=True)
 val_loader = DataLoader(val_dataset, batch_size=32, shuffle=False)
+test_loader = DataLoader(test_dataset, batch_size=32, shuffle=False)
 
 # ========== 2. Define MAE Model ==========
 class MAE(nn.Module):
@@ -148,6 +151,19 @@ with torch.no_grad():
 features = np.vstack(features)
 labels = np.concatenate(labels)
 
+test_features, test_labels = [], []
+with torch.no_grad():
+    for imgs, lbls in test_loader:
+        imgs = imgs.to(device)
+        patches = mae.encoder.patch_embed(imgs)
+        encoded = mae.encoder.blocks(patches).mean(dim=1)
+        test_features.append(encoded.cpu().numpy())
+        test_labels.append(lbls.numpy())
+
+test_features = np.vstack(test_features)
+test_labels = np.concatenate(test_labels)
+
+
 # ========== 5. Train Linear and MLP Classifiers ==========
 print("🎯 Training probes...")
 X_train, X_test, y_train, y_test = train_test_split(features, labels, test_size=0.3, stratify=labels, random_state=42)
@@ -178,12 +194,18 @@ clf_mlp = make_pipeline(
 clf_mlp.fit(X_train, y_train)
 acc_mlp = accuracy_score(y_test, clf_mlp.predict(X_test))
 
+# Final evaluation on true test set
+acc_linear_test = accuracy_score(test_labels, clf_linear.predict(test_features))
+acc_mlp_test = accuracy_score(test_labels, clf_mlp.predict(test_features))
+
+
 # Save results
 df = pd.DataFrame({
     "Probe": ["Linear", "MLP"],
-    "Accuracy": [acc_linear, acc_mlp]
+    "Validation Accuracy": [acc_linear, acc_mlp],
+    "Test Accuracy": [acc_linear_test, acc_mlp_test]
 })
-df.to_csv("probe_results_4.csv", index=False)
+df.to_csv("probe_results_test.csv", index=False)
 
 print("✅ Done. All steps completed.")
 print("📈 Loss curve saved to 'mae_loss_curve.png'")
