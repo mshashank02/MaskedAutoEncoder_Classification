@@ -142,7 +142,10 @@ print("🎯 Training probes...")
 X_train, X_test, y_train, y_test = train_test_split(features, labels, test_size=0.3, stratify=labels, random_state=42)
 
 # Linear Probe
-clf_linear = LogisticRegression(max_iter=5000)
+clf_linear = make_pipeline(
+    StandardScaler(),
+    LogisticRegression(max_iter=2000)  # also increase iteration cap
+)
 clf_linear.fit(X_train, y_train)
 acc_linear = accuracy_score(y_test, clf_linear.predict(X_test))
 
