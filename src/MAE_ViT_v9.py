@@ -18,7 +18,7 @@ import pandas as pd
 # Configuration
 DATA_ROOT = './flower_data'
 BATCH_SIZE = 8
-NUM_EPOCHS = 20
+NUM_EPOCHS = 50
 LR = 1e-4
 DEVICE = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
