@@ -93,7 +93,7 @@ processor.save_pretrained("./vitmae_flower_pretrained")
 
 # Step 2: Load ViT encoder and transfer weights
 vit_encoder = ViTModel.from_pretrained("facebook/vit-mae-base")
-vit_encoder.load_state_dict(mae_model.vit.state_dict())
+vit_encoder.load_state_dict(mae_model.vit.state_dict(), strict=False)
 vit_encoder.to(DEVICE)
 vit_encoder.eval()
 
