@@ -155,5 +155,5 @@ results = pd.DataFrame({
     "Validation Accuracy": [acc_linear_val, acc_mlp_val],
     "Test Accuracy": [acc_linear_test, acc_mlp_test]
 })
-results.to_csv("vitmae_probe_results.csv", index=False)
+results.to_csv("vitmae_probe_results_7.csv", index=False)
 print("Results saved to vitmae_probe_results.csv")
