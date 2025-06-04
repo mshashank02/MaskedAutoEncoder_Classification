@@ -18,7 +18,7 @@ import pandas as pd
 # Configuration
 DATA_ROOT = './flower_data'
 BATCH_SIZE = 8
-NUM_EPOCHS = 20
+NUM_EPOCHS = 50
 LR = 1e-4
 DEVICE = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
@@ -139,5 +139,5 @@ results = pd.DataFrame({
     "Validation Accuracy": [acc_val_linear, acc_val_mlp],
     "Test Accuracy": [acc_test_linear, acc_test_mlp]
 })
-results.to_csv("vitmae_flower_probe_results_9.csv", index=False)
+results.to_csv("vitmae_flower_probe_results_9_1.csv", index=False)
 print(results)
